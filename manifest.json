@@ -1,8 +1,8 @@
 {
   "manifest_version": 2,
-  "name": "Asana Extension for Chrome",
+  "name": "Asana Charts",
   "version": "0.9.1",
-  "description": "Integrates Asana with your browsing experience.",
+  "description": "Visualize Asana.",
   "icons": {
     "128": "icon128.png"
   },
@@ -10,8 +10,7 @@
 
   "browser_action": {
     "default_icon": "icon19.png",
-    "default_title": "Asana",
-    "default_popup": "popup.html"
+    "default_title": "Asana Charts"
   },
   "background": {
     "page": "background.html"
@@ -28,9 +27,6 @@
   "content_scripts": [{
     "matches": [
       "<all_urls>"
-    ],
-    "exclude_matches": [
-      "*://*.asana.com/*"
     ],
     "js": [
       "asana.js",

@@ -19,42 +19,7 @@ window.addEventListener('load', function() {
         // And ensure the user is logged in ...
         Asana.ServerModel.isLoggedIn(function(is_logged_in) {
           if (is_logged_in) {
-            if (window.quick_add_request) {
-              // If this was a QuickAdd request (set by the code popping up
-              // the window in Asana.ExtensionServer), then we have all the
-              // info we need and should show the add UI right away.
-              showAddUi(
-                  quick_add_request.url, quick_add_request.title,
-                  quick_add_request.selected_text, options);
-            } else {
-              // Otherwise we want to get the selection from the tab that
-              // was active when we were opened. So we set up a listener
-              // to listen for the selection send event from the content
-              // window ...
-              var selection = "";
-              var listener = function(request, sender, sendResponse) {
-                if (request.type === "selection") {
-                  chrome.extension.onRequest.removeListener(listener);
-                  console.info("Asana popup got selection");
-                  selection = "\n" + request.value;
-                }
-              };
-              chrome.extension.onRequest.addListener(listener);
-
-              // ... and then we make a request to the content window to
-              // send us the selection.
-              var tab = tabs[0];
-              chrome.tabs.executeScript(tab.id, {
-                code: "(Asana && Asana.SelectionClient) ? Asana.SelectionClient.sendSelection() : 0"
-              }, function() {
-                // The requests appear to be handled synchronously, so the
-                // selection should have been sent by the time we get this
-                // completion callback. If the timing ever changes, however,
-                // that could break and we would never show the add UI.
-                // So this could be made more robust.
-                showAddUi(tab.url, tab.title, selection, options);
-              });
-            }
+            showAddUi(options);
           } else {
             // The user is not even logged in. Prompt them to do so!
             showLogin(Asana.Options.loginUrl(options));
@@ -72,14 +37,18 @@ var showView = function(name) {
   });
 };
 
+// Helper to return sum of array elements.
+var sum = function(arr) {
+  return arr.reduce(function (a, b) { return a + b; }, 0);
+}
+
 // Show the add UI
-var showAddUi = function(url, title, selected_text, options) {
+var showAddUi = function(options) {
   var self = this;
+
+  $("#center_pane").tabs();
+
   showView("add");
-  $("#notes").val(url + selected_text);
-  $("#name").val(title);
-  $("#name").focus();
-  $("#name").select();
   Asana.ServerModel.me(function(user) {
     // Just to cache result.
     Asana.ServerModel.workspaces(function(workspaces) {
@@ -89,91 +58,237 @@ var showAddUi = function(url, title, selected_text, options) {
             "<option value='" + workspace.id + "'>" + workspace.name + "</option>");
       });
       $("#workspace").val(options.default_workspace_id);
-      onWorkspaceChanged();
+      onWorkspaceChanged().done(function() {
+        $("#facets").selectable({
+          selected: function(event, ui) {
+            $(ui.selected).addClass('selected');
+            onProjectChanged();
+          },
+          unselected: function(event, ui) {
+            $(ui.unselected).removeClass('selected');
+          }
+        });
+      });
       $("#workspace").change(onWorkspaceChanged);
     });
   });
 };
 
-// Enable/disable the add button.
-var setAddEnabled = function(enabled) {
-  var button = $("#add_button");
-  if (enabled) {
-    button.removeClass("disabled");
-    button.addClass("enabled");
-    button.click(function() {
-      createTask();
-      return false;
+// When the user changes the project, update the chart view.
+var onProjectChanged = function() {
+  var project_id = readProjectId(),
+    dfd = $.Deferred();
+  hideError();
+  $("#gantt, #burndown").html("Loading...");
+  Asana.ServerModel.projectTasks(project_id, function(tasks) {
+    var minX = moment().valueOf();
+    var reqs = tasks.map(function(task, i) {
+      return Asana.ServerModel.task(task.id, function(record){
+        var created = moment(record.created_at).startOf('day');
+        task.estimateBase = 'human';
+        if (record.due_on) {
+          var due = moment(record.due_on).startOf('day');
+          task.x = due.valueOf();
+          task.estimate = Math.abs(created.diff(due));
+          task.due = due.valueOf();
+          task.estimateBase = 'due - created';
+        } else {
+          var estimate = moment.duration(7, 'd');
+          task.x = created.add(estimate).valueOf();
+          task.estimate = estimate.asMilliseconds();
+          task.estimateBase = 'default';
+        }
+        task.created = created.valueOf();
+        task.completed = record.completed_at ? moment(record.completed_at).startOf('day').valueOf() : null;
+        task.assignee = record.assignee;
+        task.size = 0; // required for scatter chart
+        minX = Math.min(minX, task.x - task.estimate);
+      })
     });
-    button.keydown(function(e) {
-      if (e.keyCode === 13) {
-        createTask();
-      }
-    });
-  } else {
-    button.removeClass("enabled");
-    button.addClass("disabled");
-    button.unbind('click');
-    button.unbind('keydown');
-  }
+
+    $.when.apply($, reqs).then(function() {
+      $("#gantt, #burndown").html("<svg></svg>");
+
+      tasks.sort(function(a, b){
+        return b.x - a.x;
+      });
+
+      // gantt chart
+      var gantt = d3.nest().key(function(d){ return d.assignee ? d.assignee.name : 'nobody'; }).entries(tasks);
+  
+      nv.addGraph(function() {
+        var chart = nv.models.scatterChart()
+                      .color(d3.scale.category10().range());
+      
+        chart.xAxis
+          .tickFormat(function(d) {
+            return d3.time.format('%x')(new Date(d))
+          });
+        chart.yAxis.tickFormat(d3.format(''));
+        chart.forceX([minX]);
+        chart.useVoronoi(false);
+        chart.tooltipContent(function(key, x, y, e, chart) {
+          var d = e.point,
+            html = ['<h3>', e.point.name, '</h3>',
+              '<p><dl><dt>Created:</dt><dd>', moment(d.created).format('YYYY/M/D ddd'), '</dd>',
+              '<dt>Due:</dt><dd>', d.due ? moment(d.due).format('YYYY/M/D ddd') : '-', '</dd>',
+              '<dt>Estimate:</dt><dd>', moment.duration(d.estimate).humanize(), '(', d.estimateBase, ')</dd>'
+              ];
+          return html.join('');
+        });
+
+        var update = function() {
+          d3.select('#gantt svg')
+              .datum(gantt)
+            .transition().duration(500)
+              .call(chart)
+            .each("end", function() {
+              var x = chart.xScale(),
+                y = chart.yScale(),
+                r = 3;
+ 
+              d3.selectAll('#gantt svg path.nv-point')
+                .attr('d', function(d) {
+                  var w = Math.abs(x(d.estimate) - x(0)),
+                    points = [[0, r], [0, -r], [-w, -r], [-w, r]];
+                  return d3.svg.line().interpolate('linear')(points) + 'Z';
+                });
+            });
+        };
+
+        update()
+        nv.utils.windowResize(update);
+
+        return chart;
+      });
+
+      // burndown chart
+      var estimatePool = {},
+        completedPool = {},
+        dueDates = [],
+        compDates = [],
+        firstDay;
+      tasks.forEach(function(d, i) {
+        d.y = i;
+
+        if (i == tasks.length - 1) {
+          firstDay = moment(d.x).subtract('days', 1).valueOf();
+        }
+
+        if(!estimatePool[d.x]) {
+          estimatePool[d.x] = [];
+          dueDates.push(d.x);
+        }
+        estimatePool[d.x].push(d.estimate);
+
+        if(!d.completed)
+          return;
+
+        if(!completedPool[d.completed]) {
+          completedPool[d.completed] = [];
+          compDates.push(d.completed);
+        }
+        completedPool[d.completed].push(d.estimate);
+      });
+
+      var estimates = [],
+        outstandings = [],
+        now = moment(),
+        sumEstimate = 0,
+        sumOutstanding;
+
+      dueDates.forEach(function(d, i) {
+        estimates.push({x: d, y: sumEstimate});
+        sumEstimate += sum(estimatePool[d])
+      });
+
+      estimates.push({x: firstDay, y: sumEstimate});
+
+      // burndown: outstanding
+      sumOutstanding = sumEstimate;
+      compDates.sort();
+      if (compDates[0] < firstDay)
+        firstDay = moment(compDates[0]).subtract('days', 1).valueOf();
+
+      outstandings.push({x: firstDay, y: sumOutstanding});
+      compDates.forEach(function(d){
+        sumOutstanding -= sum(completedPool[d] || []);
+        outstandings.push({x: d, y: sumOutstanding});
+      });
+      var today = moment().startOf('day').valueOf();
+      outstandings.push({x: today, y: sumOutstanding});
+
+      var burndown = [{values: estimates, key: 'Estimated', color: '#ff7f0e'}, {values: outstandings, key: 'Outstanding', color: '#2ca02c'}];
+      nv.addGraph(function() {
+        var chart = nv.models.lineChart();
+      
+        chart.xAxis
+          .tickFormat(function(d) {
+            return d3.time.format('%x')(new Date(d))
+          });
+        chart.yAxis.tickFormat(function(d) {
+            return moment.duration(d).humanize();
+        });
+        chart.lines.scatter.useVoronoi(false);
+
+        var update = function() {
+          d3.select('#burndown svg')
+              .datum(burndown)
+            .transition().duration(500)
+              .call(chart);
+        };
+
+        update()
+        nv.utils.windowResize(update);
+
+        return chart;
+      });
+      dfd.resolve();
+    }); // $.when()
+  }); // .projectTasks()
+  return dfd.promise();
 };
 
-// Set the add button as being "working", waiting for the Asana request
-// to complete.
-var setAddWorking = function(working) {
-  setAddEnabled(!working);
-  $("#add_button").find(".button-text").text(
-      working ? "Adding..." : "Add to Asana");
-};
-
-// When the user changes the workspace, update the list of users.
+// When the user changes the workspace, update the list of projects.
 var onWorkspaceChanged = function() {
-  var workspace_id = readWorkspaceId();
-  $("#assignee").html("<option>Loading...</option>");
-  setAddEnabled(false);
-  Asana.ServerModel.users(workspace_id, function(users) {
-    $("#assignee").html("");
-    users = users.sort(function(a, b) {
+  var workspace_id = readWorkspaceId(),
+    dfd = $.Deferred();
+  hideError();
+  $("#facets").html("Loading...");
+  Asana.ServerModel.projects(workspace_id, function(projects) {
+    $("#facets").html("");
+    projects = projects.sort(function(a, b) {
       return (a.name < b.name) ? -1 : ((a.name > b.name) ? 1 : 0);
     });
-    users.forEach(function(user) {
-      $("#assignee").append(
-          "<option value='" + user.id + "'>" + user.name + "</option>");
+    var items = d3.select('#facets').selectAll('a.list-item').data(projects);
+    items.enter()
+      .append('a')
+      .attr('class', 'list-item')
+      .text(function(d) { return d.name; });
+
+    items
+      .text(function(d) {return d.name });
+
+    items.exit()
+      .remove();
+
+    Asana.ServerModel.me(function(project) {
+      items.each(function(d) {
+        if (d.id === project.id)
+          $(this).trigger('click');
+      });
     });
-    Asana.ServerModel.me(function(user) {
-      $("#assignee").val(user.id);
-    });
-    setAddEnabled(true);
+    dfd.resolve();
   });
+  return dfd.promise();
 };
 
-var readAssignee = function() {
-  return $("#assignee").val();
+var readProjectId = function() {
+  return d3.select("#facets .list-item.ui-selected").datum().id;
 };
 
 var readWorkspaceId = function() {
   return $("#workspace").val();
-};
-
-var createTask = function() {
-  console.info("Creating task");
-  hideError();
-  setAddWorking(true);
-  Asana.ServerModel.createTask(
-      readWorkspaceId(),
-      {
-        name: $("#name").val(),
-        notes: $("#notes").val(),
-        assignee: readAssignee()
-      },
-      function(task) {
-        setAddWorking(false);
-        showSuccess(task);
-      },
-      function(response) {
-        setAddWorking(false);
-        showError(response.errors[0].message);
-      });
 };
 
 var showError = function(message) {
@@ -183,22 +298,6 @@ var showError = function(message) {
 
 var hideError = function() {
   $("#error").css("display", "none");
-};
-
-// Helper to show a success message after a task is added.
-var showSuccess = function(task) {
-  Asana.ServerModel.taskViewUrl(task, function(url) {
-    var name = task.name.replace(/^\s*/, "").replace(/\s*$/, "");
-    $("#new_task_link").attr("href", url);
-    $("#new_task_link").text(name !== "" ? name : "unnamed task");
-    $("#new_task_link").unbind("click");
-    $("#new_task_link").click(function() {
-      chrome.tabs.create({url: url});
-      window.close();
-      return false;
-    });
-    showView("success");
-  });
 };
 
 // Helper to show the login page.
@@ -212,12 +311,3 @@ var showLogin = function(url) {
   });
   showView("login");
 };
-
-// Close the popup if the ESCAPE key is pressed.
-window.addEventListener("keydown", function(e) {
-  if (e.keyCode === 27) {
-    window.close();
-  }
-}, /*capture=*/false);
-
-$("#close-banner").click(function() { window.close(); });

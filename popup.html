@@ -1,67 +1,51 @@
 <html>
 <head>
+  <script type="text/javascript" src="moment.min.js"></script>
+  <script type="text/javascript" src="d3.v2.js"></script>
+  <script type="text/javascript" src="nv.d3.js"></script>
   <script type="text/javascript" src="jquery-1.7.1.min.js"></script>
   <script type="text/javascript" src="jquery-ui-1.8.10.custom.min.js"></script>
   <script type="text/javascript" src="asana.js"></script>
   <script type="text/javascript" src="options.js"></script>
   <script type="text/javascript" src="api_bridge.js"></script>
   <script type="text/javascript" src="server_model.js"></script>
+  <link rel="stylesheet" href="jquery-ui.css"/>
+  <link rel="stylesheet" href="classic.css"/>
   <link rel="stylesheet" href="common.css"/>
   <link rel="stylesheet" href="popup_style.css"/>
+  <link rel="stylesheet" href="nv.d3.css"/>
 </head>
 
 <body>
-
-  <div id="banner">
-    Add to Asana
-    <a id="close-banner" class="close-x"></a>
-  </div>
-
   <div id="error" style="display:none">
     <span class="error-icon"></span>
     Sorry, an error occurred. Please try again later.
   </div>
 
-  <div id="content">
+  <div id="content" class="three-panes">
     <div id="add_view" style="display:none">
-      <table class="form">
-        <tr>
-          <td class="field-name">Name:</td>
-          <td class="field-value">
-            <input id="name"/>
-          </td>
-        </tr>
-
-        <tr>
-          <td class="field-name">Notes:</td>
-          <td class="field-value">
-            <textarea id="notes"></textarea>
-          </td>
-        </tr>
-
-        <tr>
-          <td class="field-name">Workspace:</td>
-          <td class="field-value">
-            <select id="workspace"><option>Loading...</option></select>
-          </td>
-        </tr>
-
-        <tr>
-          <td class="field-name">Assignee:</td>
-          <td class="field-value">
-            <select id="assignee"><option>Loading...</option></select>
-          </td>
-        </tr>
-
-        <tr>
-          <td class="field-name"></td>
-          <td class="field-value">
-            <div id="add_button" tabindex="0" class="button primary-button disabled">
-              <span class="button-text">Add to Asana</span>
+      <div id="navigation_dock">
+        <div id="left_pane">
+          <select id="workspace"><option>Loading...</option></select>
+          <ul class="tab-view">
+            <li class="projects_tab tab selected " id="luna5"><a>Projects</a></li>
+            <li class="tags_tab tab unselected " id="luna4"><a>Tags</a></li>
+            <li class="people_tab tab unselected "><a>People</a></li></ul>
+          </ul>
+          <div class="scroll-wrapper tab-contents">
+            <div id="facets" class="list-section">
             </div>
-          </td>
-        </tr>
-      </table>
+          </div>
+        </div>
+        <div id="center_pane">
+          <ul id="chart_tabs" class="tab-view">
+            <li><a href="#gantt">gantt</a></li>
+            <li><a href="#burndown">burndown</a></li>
+          </ul>
+          <div id="gantt"><svg></svg></div>
+          <div id="burndown"><svg></svg></div>
+        </div>
+      </div>
     </div>
 
     <div id="success_view" style="display:none">

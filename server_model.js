@@ -88,6 +88,62 @@ Asana.ServerModel = {
   },
 
   /**
+   * Requests the set of unarchived tasks in a workspace.
+   *
+   * @param callback {Function(tasks)} Callback on success.
+   *     tasks {dict[]}
+   */
+  workspaceTasks: function(workspace_id, callback) {
+    var self = this;
+    Asana.ApiBridge.request("GET", "/workspaces/" + workspace_id + "/tasks", {},
+        function(response) {
+          self._makeCallback(response, callback);
+        });
+  },
+
+  /**
+   * Requests the set of projects in a workspace.
+   *
+   * @param callback {Function(projects)} Callback on success.
+   *     projects {dict[]}
+   */
+  projects: function(workspace_id, callback) {
+    var self = this;
+    Asana.ApiBridge.request("GET", "/workspaces/" + workspace_id + "/projects", {},
+        function(response) {
+          self._makeCallback(response, callback);
+        });
+  },
+
+  /**
+   * Requests the set of tasks in a project.
+   *
+   * @param callback {Function(tasks)} Callback on success.
+   *     tasks {dict[]}
+   */
+  projectTasks: function(project_id, callback) {
+    var self = this;
+    Asana.ApiBridge.request("GET", "/projects/" + project_id + "/tasks", {},
+        function(response) {
+          self._makeCallback(response, callback);
+        });
+  },
+
+  /**
+   * Requests the task record for the given id.
+   *
+   * @param callback {Function(task)} Callback on success.
+   *     task {dict}
+   */
+  task: function(task_id, callback) {
+    var self = this;
+    return Asana.ApiBridge.request("GET", "/tasks/" + task_id, {},
+        function(response) {
+          self._makeCallback(response, callback);
+        });
+  },
+
+  /**
    * Requests the user record for the logged-in user.
    *
    * @param callback {Function(user)} Callback on success.

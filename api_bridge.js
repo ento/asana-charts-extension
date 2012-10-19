@@ -39,7 +39,8 @@ Asana.ApiBridge = {
    *     error {String?} Error message, if there was a problem.
    */
   request: function(http_method, path, params, callback) {
-    var url = this.baseApiUrl() + path;
+    var url = this.baseApiUrl() + path,
+      dfd = $.Deferred();
     chrome.cookies.get({
       url: url,
       name: 'ticket'
@@ -93,7 +94,10 @@ Asana.ApiBridge = {
         attrs.processData = false;
         attrs.contentType = "application/json";
       }
-      $.ajax(attrs);
+      $.ajax(attrs)
+        .done(dfd.resolve)
+        .fail(dfd.reject);
     });
+    return dfd.promise();
   }
 };

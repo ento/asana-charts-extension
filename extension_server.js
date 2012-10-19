@@ -27,6 +27,11 @@ Asana.ExtensionServer = {
         popup.quick_add_request = request;
       }
     });
+
+    chrome.browserAction.onClicked.addListener(function(tab){
+      chrome.tabs.create({url: chrome.extension.getURL('popup.html')}, function(tab){
+      });
+    });
   }
 
 };
